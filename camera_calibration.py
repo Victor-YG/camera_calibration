@@ -1,23 +1,53 @@
 import os
-from posixpath import basename, join
 import cv2
 import glob
 import json
+import math
 import argparse
 import numpy as np
 
+# TODO::use logging module to handle print output
 
-def find_checkerboard_pattern_in_images(image_paths, rows, cols, spacing):
+def create_pattern(spec):
+    # TODO::draw the pattern out and verify
+    pattern = np.zeros((spec["rows"] * spec["cols"], 3), np.float32)
+
+    # create grid
+    grid = np.mgrid[0 : spec["rows"], 0 : spec["cols"]].T.reshape(-1, 2)
+    grid = grid * spec["spacing"]
+
+    # handle asymetric
+    if "asymmetric" in spec:
+        if spec["asymetric"]:
+            new_grid = []
+
+            # keep only even half
+            for r in range(spec["rows"]):
+                for c in range(spec["cols"]):
+                    if r + c % 2 == 0:
+                        new_grid.append(grid[c + r * spec["cols"]])
+
+            # adjust scaling
+            grid = new_grid / math.sqrt(2)
+
+    # apply offset
+    grid[:, 0] += spec["x_offset"]
+    grid[:, 1] += spec["y_offset"]
+
+    pattern[:, 0:2] = grid
+    # print(pattern)
+    return pattern
+
+
+def find_checkerboard_pattern_in_images(image_paths, spec):
+    create_pattern(spec)
+
     pattern_points = {}
     image_points = {}
     images_overlayed = {}
 
     # construct pattern
-    pattern = np.zeros((rows * cols, 3), np.float32)
-    grid    = np.mgrid[0:rows, 0:cols].T.reshape(-1, 2)
-    corners = grid * spacing
-    pattern[:, 0:2] = corners
-    # print(pattern)
+    pattern = create_pattern(spec)
 
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
@@ -26,14 +56,15 @@ def find_checkerboard_pattern_in_images(image_paths, rows, cols, spacing):
         img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         # find corners points
-        ret, corners = cv2.findChessboardCorners(img_gray, (rows, cols), None)
+        ret, corners = cv2.findChessboardCorners(img_gray, (spec["rows"], spec["cols"]), None)
 
         if ret == True:
             # refine corner points
             corners_accurate = cv2.cornerSubPix(img_gray, corners, (11, 11), (-1, -1), criteria)
 
             # Draw and display the corners
-            image_overlayed = cv2.drawChessboardCorners(image, (rows,cols), corners_accurate, ret)
+            # TODO::extract the below common part either by creating a wrapper function or as a sub function (depends on how Charuco should be handled)
+            image_overlayed = cv2.drawChessboardCorners(image, (spec["rows"], spec["cols"]), corners_accurate, ret)
 
             # add points
             pattern_points[image_path] = pattern
@@ -41,7 +72,40 @@ def find_checkerboard_pattern_in_images(image_paths, rows, cols, spacing):
             images_overlayed[image_path] = image_overlayed
 
         else:
-            print("Failed to find pattern in image: '{}'".format(image_path))
+            print("[WARN] Failed to find pattern in image: '{}'".format(image_path))
+
+    return pattern_points, image_points, images_overlayed
+
+
+def find_circle_pattern_in_images(image_paths, spec):
+    pattern_points = {}
+    image_points = {}
+    images_overlayed = {}
+
+    # construct pattern
+    pattern = create_pattern(spec)
+
+    for image_path in image_paths:
+        image = cv2.imread(image_path)
+        img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # find circle centers
+        if spec["asymetric"]:
+            ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_ASYMMETRIC_GRID)
+        else:
+            ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_SYMMETRIC_GRID)
+
+        if ret == True:
+            # Draw and display the corners
+            image_overlayed = cv2.drawChessboardCorners(image, (spec["rows"], spec["cols"]), centers, ret)
+
+            # add points
+            pattern_points[image_path] = pattern
+            image_points[image_path] = centers
+            images_overlayed[image_path] = image_overlayed
+
+        else:
+            print("[WARN] Failed to find pattern in image: '{}'".format(image_path))
 
     return pattern_points, image_points, images_overlayed
 
@@ -65,7 +129,21 @@ def save_calibration_result(file_path, image_paths, intrinsic, distortion, t_vec
     with open(file_path, "w") as f:
         json.dump(calib_result, indent=4, fp=f)
     
-    print("Calibration output saved to: '{}'".format(file_path))
+    print("[INFO] Calibration output saved to: '{}'".format(file_path))
+
+
+def save_overlayed_images(output_folder, images_overlayed):
+    output_folder = os.path.join(os.path.dirname(output_folder), "overlayed")
+    if os.path.exists(output_folder) == False:
+        os.mkdir(output_folder)
+    
+    for image_path, image in images_overlayed.items():
+        _, file_name = os.path.split(image_path)
+        base_name, ext = os.path.splitext(file_name)
+        output_path = os.path.join(output_folder, base_name + "_overlayed" + ext)
+        cv2.imwrite(output_path, image)
+    
+    print("[INFO] Saved overlayed images to: '{}'".format(output_folder))
 
 
 def main():
@@ -77,16 +155,16 @@ def main():
     parser.add_argument("--output", help="File or folder to output the calibration result", default=None, required=False)
     parser.add_argument("--key", help="Keyword of images (e.g. *.png)", default="", required=False)
     parser.add_argument("--pattern", help="JSON file that specifies the calibration pattern.", required=True)
-    parser.add_argument("-intrinsic", action="store_true")
-    parser.add_argument("-extrinsic", action="store_true")
+    # parser.add_argument("-intrinsic", action="store_true")
+    # parser.add_argument("-extrinsic", action="store_true")
     parser.add_argument("-save_images", action="store_true")
     args = parser.parse_args()
 
     if os.path.exists(args.input) == False:
-        exit("Input path is not valid.")
+        exit("[FAIL] Input path is not valid.")
     
     if os.path.exists(args.pattern) == False:
-        exit("Pattern file does not exist.")
+        exit("[FAIL] Pattern file does not exist.")
 
     if args.output == None:
         if os.path.isdir(args.input):
@@ -100,9 +178,9 @@ def main():
     image_paths = sorted(glob.glob(os.path.join(args.input, args.key)))
 
     if len(image_paths) == 0:
-        exit("Failed to find images in folder '{}' with key '{}'".format(args.input, args.key))
+        exit("[FAIL] Failed to find images in folder '{}' with key '{}'".format(args.input, args.key))
 
-    print("Found images: ")
+    print("[INFO] Found images: ")
     for image_path in image_paths:
         print(image_path)
     
@@ -114,12 +192,16 @@ def main():
         pattern = json.load(f)
     
     # find pattern
+    # TODO::modify the behavior to return dictionary with keys for all images but None if pattern not found
     if "checkerboard" in pattern:
         spec = pattern["checkerboard"]
-        pattern_points, image_points, images_overlayed = find_checkerboard_pattern_in_images(image_paths, spec["rows"], spec["cols"], spec["spacing"])
+        pattern_points, image_points, images_overlayed = find_checkerboard_pattern_in_images(image_paths, spec)
+    elif "circle" in pattern:
+        spec = pattern["circle"]
+        pattern_points, image_points, images_overlayed = find_circle_pattern_in_images(image_paths, spec)
 
     if len(image_points) == 0:
-        exit("Failed to find any pattern.")
+        exit("[FAIL] Failed to find any pattern.")
 
     #############
     # calibrate #
@@ -135,11 +217,7 @@ def main():
     
     # save loverlayed images
     if args.save_images:
-        for image_path, image in images_overlayed.items():
-            folder, file_name = os.path.split(image_path)
-            base_name, ext = os.path.splitext(file_name)
-            output_path = os.path.join(folder, base_name + "_overlayed" + ext)
-            cv2.imwrite(output_path, image)
+        save_overlayed_images(args.output, images_overlayed)
 
 
 if __name__ == "__main__":
