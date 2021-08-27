@@ -12,9 +12,8 @@ This implementation follows:
 checkerboard:
 https://docs.opencv.org/4.5.2/dc/dbb/tutorial_py_calibration.html
 
-circle board:
+circle board (to be tested):
 https://docs.opencv.org/4.5.1/d4/d94/tutorial_camera_calibration.html
 
-Will be added:
-charuco:
+charuco (to be tested):
 https://docs.opencv.org/4.5.1/df/d4a/tutorial_charuco_detection.html

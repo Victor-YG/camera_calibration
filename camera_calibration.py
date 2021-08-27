@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 
 # TODO::use logging module to handle print output
+# TODO::test circle pattern and ChArUco pattern
 
 def create_pattern(spec):
     # TODO::draw the pattern out and verify
@@ -14,7 +15,7 @@ def create_pattern(spec):
 
     # create grid
     grid = np.mgrid[0 : spec["rows"], 0 : spec["cols"]].T.reshape(-1, 2)
-    grid = grid * spec["spacing"]
+    grid = grid * spec["grid_size"]
 
     # handle asymetric
     if "asymmetric" in spec:
@@ -63,7 +64,7 @@ def find_checkerboard_pattern_in_images(image_paths, spec):
             corners_accurate = cv2.cornerSubPix(img_gray, corners, (11, 11), (-1, -1), criteria)
 
             # Draw and display the corners
-            # TODO::extract the below common part either by creating a wrapper function or as a sub function (depends on how Charuco should be handled)
+            # TODO::extract the below common part either by creating a wrapper function or as a sub function (depends on how ChArUco should be handled)
             image_overlayed = cv2.drawChessboardCorners(image, (spec["rows"], spec["cols"]), corners_accurate, ret)
 
             # add points
@@ -84,6 +85,79 @@ def find_circle_pattern_in_images(image_paths, spec):
 
     # construct pattern
     pattern = create_pattern(spec)
+
+    for image_path in image_paths:
+        image = cv2.imread(image_path)
+        img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # find circle centers
+        if spec["asymetric"]:
+            ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_ASYMMETRIC_GRID)
+        else:
+            ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_SYMMETRIC_GRID)
+
+        if ret == True:
+            # Draw and display the corners
+            image_overlayed = cv2.drawChessboardCorners(image, (spec["rows"], spec["cols"]), centers, ret)
+
+            # add points
+            pattern_points[image_path] = pattern
+            image_points[image_path] = centers
+            images_overlayed[image_path] = image_overlayed
+
+        else:
+            print("[WARN] Failed to find pattern in image: '{}'".format(image_path))
+
+    return pattern_points, image_points, images_overlayed
+
+
+def find_charuco_pattern_in_iamges(image_paths, spec):
+    point_ids = {}
+    points = {}
+    images_overlayed = {}
+
+    # create dictionary
+    if spec["dictionary"] == "AruCo_DICT_4X4":
+        aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_250)
+    elif spec["dictionary"] == "AruCo_DICT_6x6":
+        aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
+    
+    # create pattern
+    pattern = cv2.aruco.CharucoBoard_create(spec["rows"], spec["cols"], spec["grid_size"], spec["marker_size"], aruco_dict)
+
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.00001)
+
+    for image_path in image_paths:
+        img = cv2.imread(image_path)
+        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(img_gray, aruco_dict)
+
+        if len(corners) > 0:
+            # refine corners
+            corners_accurate = cv2.cornerSubPix(img_gray, corners, (11, 11), (-1, -1), criteria)
+
+            # interpolate corners
+            count, corners_final, ids_final = cv2.aruco.interpolateCornersCharuco(corners, ids, img_gray, pattern)
+            if count > 0:
+                points[image_path] = corners_final
+                point_ids[image_path] = ids_final
+
+                # Draw and display the corners
+                image_overlayed = cv2.drawChessboardCorners(image_path, (spec["rows"], spec["cols"]), corners_final)
+                images_overlayed[image_path] = image_overlayed
+
+    return pattern, point_ids, points, images_overlayed
+
+
+def find_charuco_pattern_in_iamges_2(image_paths, spec):
+    pattern_points = {}
+    image_points = {}
+    images_overlayed = {}
+
+    # construct pattern
+    pattern = create_pattern(spec)
+    aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
+    pattern = cv2.aruco.CharucoBoard_create(spec["rows"], spec["cols"], 1, .8, aruco_dict)
 
     for image_path in image_paths:
         image = cv2.imread(image_path)
@@ -199,6 +273,9 @@ def main():
     elif "circle" in pattern:
         spec = pattern["circle"]
         pattern_points, image_points, images_overlayed = find_circle_pattern_in_images(image_paths, spec)
+    elif "ChArUco" in pattern:
+        spec = pattern["ChArUco"]
+        pattern, pattern_points, image_points, images_overlayed = find_charuco_pattern_in_iamges(image_paths, spec)
 
     if len(image_points) == 0:
         exit("[FAIL] Failed to find any pattern.")
@@ -208,7 +285,13 @@ def main():
     #############
     overlayed = list(images_overlayed.values())
     image_size = overlayed[0].shape[0:-1]
-    ret, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(list(pattern_points.values()), list(image_points.values()), image_size, None, None)
+
+    if "ChArUco" in pattern:
+        points = [x for x in image_points.values() if len(x) >= 4]
+        point_ids = [x for x in pattern_points.values() if len(x) >= 4]
+        ret, camera_matrix, dist_coeff, rvec, tvec = cv2.aruco.calibrateCameraCharuco(points, point_ids, pattern, image_size, None, None)
+    else:
+        ret, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(list(pattern_points.values()), list(image_points.values()), image_size, None, None)
 
     #######################
     # save output as JSON #
