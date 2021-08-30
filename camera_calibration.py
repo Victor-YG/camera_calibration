@@ -17,9 +17,9 @@ def create_pattern(spec):
     grid = np.mgrid[0 : spec["rows"], 0 : spec["cols"]].T.reshape(-1, 2)
     grid = grid * spec["grid_size"]
 
-    # handle asymetric
+    # handle asymmetric
     if "asymmetric" in spec:
-        if spec["asymetric"]:
+        if spec["asymmetric"]:
             new_grid = []
 
             # keep only even half
@@ -91,7 +91,7 @@ def find_circle_pattern_in_images(image_paths, spec):
         img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         # find circle centers
-        if spec["asymetric"]:
+        if spec["asymmetric"]:
             ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_ASYMMETRIC_GRID)
         else:
             ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_SYMMETRIC_GRID)
@@ -164,7 +164,7 @@ def find_charuco_pattern_in_iamges_2(image_paths, spec):
         img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         # find circle centers
-        if spec["asymetric"]:
+        if spec["asymmetric"]:
             ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_ASYMMETRIC_GRID)
         else:
             ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_SYMMETRIC_GRID)

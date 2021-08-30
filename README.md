@@ -1,11 +1,11 @@
 # camera_calibration
-For camera's intrinsic and extrinsic calibration. extrinsic calibration to be added.
+For camera's intrinsic and extrinsic calibration. Extrinsic calibration to be added.
 
 To generate calibration pattern, 
 either use calib.io:
 https://calib.io/pages/camera-calibration-pattern-generator
 
-Or use pattern generation script that comes with OpenCV
+Or use pattern generation script that comes with OpenCV:
 https://docs.opencv.org/4.5.1/da/d0d/tutorial_camera_calibration_pattern.html
 
 This implementation follows:
