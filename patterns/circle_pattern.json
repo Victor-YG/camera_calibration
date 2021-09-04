@@ -1,0 +1,12 @@
+{
+    "circles":
+    {
+        "asymmetric": false,
+        "rows": 8,
+        "cols": 11,
+        "radius": 5,
+        "grid_size": 20,
+        "x_offset": 0,
+        "y_offset": 0 
+    }
+}
