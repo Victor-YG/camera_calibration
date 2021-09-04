@@ -185,17 +185,19 @@ def save_calibration_result(file_path, image_paths, image_size, intrinsic, disto
     print("[INFO]: Calibration output saved to: '{}'".format(file_path))
 
 
-def save_overlayed_images(output_folder, images_overlayed):
+def save_overlayed_images(output_folder, images_overlayed, intrinsic, distortion, r_vecs, t_vecs):
     output_folder = os.path.join(os.path.dirname(output_folder), "overlayed")
     if os.path.exists(output_folder) == False:
         os.mkdir(output_folder)
-    
-    for image_path, image in images_overlayed.items():
+
+    for (image_path, image), r_vec, t_vec in zip(images_overlayed.items(), r_vecs, t_vecs):
+        image_output = cv2.drawFrameAxes(image, intrinsic, distortion, r_vec, t_vec, 30)
+        
         _, file_name = os.path.split(image_path)
         base_name, ext = os.path.splitext(file_name)
         output_path = os.path.join(output_folder, base_name + "_overlayed" + ext)
-        cv2.imwrite(output_path, image)
-    
+        cv2.imwrite(output_path, image_output)
+
     print("[INFO]: Saved overlayed images to: '{}'".format(output_folder))
 
 
@@ -265,7 +267,6 @@ def main():
     #############
     overlayed = list(images_overlayed.values())
     image_size = overlayed[0].shape[0:-1]
-    print(image_size)
 
     if "ChArUco" in pattern:
         points = [x for x in image_points.values() if len(x) >= 4]
@@ -283,7 +284,7 @@ def main():
     
     # save loverlayed images
     if args.save_images:
-        save_overlayed_images(args.output, images_overlayed)
+        save_overlayed_images(args.output, images_overlayed, intrinsic, distortion, r_vecs, t_vecs)
 
 
 if __name__ == "__main__":
