@@ -117,42 +117,6 @@ def find_circle_pattern_in_images(image_paths, spec):
     return pattern_points, image_points, images_overlayed
 
 
-def find_charuco_pattern_in_iamges(image_paths, spec):
-    point_ids = {}
-    points = {}
-    images_overlayed = {}
-
-    # create dictionary
-    if spec["dictionary"] == "AruCo_DICT_4X4":
-        aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_250)
-    elif spec["dictionary"] == "AruCo_DICT_6x6":
-        aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
-    
-    # create pattern
-    pattern = cv2.aruco.CharucoBoard_create(spec["cols"], spec["rows"], spec["grid_size"], spec["marker_size"], aruco_dict)
-
-
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.00001)
-
-    for image_path in image_paths:
-        image = cv2.imread(image_path)
-        img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(img_gray, aruco_dict)
-
-        if len(corners) > 0:
-            # interpolate corners
-            count, corners_final, ids_final = cv2.aruco.interpolateCornersCharuco(corners, ids, img_gray, pattern)
-            if count > 0:
-                points[image_path] = corners_final
-                point_ids[image_path] = ids_final
-
-                # Draw and display the corners
-                image_overlayed = cv2.aruco.drawDetectedCornersCharuco(image, corners_final, ids_final)
-                images_overlayed[image_path] = image_overlayed
-
-    return pattern, point_ids, points, images_overlayed
-
-
 def save_calibration_result(file_path, image_paths, image_size, intrinsic, distortion, t_vecs, r_vecs):
     calib_result = {}
     calib_result["width"] = image_size[1]
@@ -171,7 +135,6 @@ def save_calibration_result(file_path, image_paths, image_size, intrinsic, disto
 
         mat = np.eye(4, 4)
         mat_rot, jacobian = cv2.Rodrigues(r_vec)
-        print(mat_rot)
         mat[0:3, 0:3] = mat_rot
         mat[0:3, 3] = t_vec[:, 0]
         extrinsic["matrix"] = mat.flatten().tolist()
@@ -210,9 +173,8 @@ def main():
     parser.add_argument("--output", help="File or folder to output the calibration result", default=None, required=False)
     parser.add_argument("--key", help="Keyword of images (e.g. *.png)", default="", required=False)
     parser.add_argument("--pattern", help="JSON file that specifies the calibration pattern.", required=True)
-    # parser.add_argument("-intrinsic", action="store_true")
-    # parser.add_argument("-extrinsic", action="store_true")
-    parser.add_argument("-save_images", action="store_true")
+    parser.add_argument("-extrinsic", help="Extrinsic calibration. Combine points from multiple static images.", action="store_true")
+    parser.add_argument("-save_images", help="Save overlayed images.", action="store_true")
     args = parser.parse_args()
 
     if os.path.exists(args.input) == False:
@@ -246,16 +208,12 @@ def main():
         pattern = json.load(f)
     
     # find pattern
-    # TODO::modify the behavior to return dictionary with keys for all images but None if pattern not found
     if "checkerboard" in pattern:
         spec = pattern["checkerboard"]
         pattern_points, image_points, images_overlayed = find_checkerboard_pattern_in_images(image_paths, spec)
     elif "circles" in pattern:
         spec = pattern["circles"]
         pattern_points, image_points, images_overlayed = find_circle_pattern_in_images(image_paths, spec)
-    elif "ChArUco" in pattern:
-        spec = pattern["ChArUco"]
-        pattern_charuco, pattern_points, image_points, images_overlayed = find_charuco_pattern_in_iamges(image_paths, spec)
     else:
         exit("[FAIL]: Unrecognized pattern name.")
 
@@ -268,12 +226,13 @@ def main():
     overlayed = list(images_overlayed.values())
     image_size = overlayed[0].shape[0:-1]
 
-    if "ChArUco" in pattern:
-        points = [x for x in image_points.values() if len(x) >= 4]
-        point_ids = [x for x in pattern_points.values() if len(x) >= 4]
-        reprojection_err, intrinsic, distortion, r_vecs, t_vecs = cv2.aruco.calibrateCameraCharuco(points, point_ids, pattern_charuco, image_size, None, None)
-    else:
-        reprojection_err, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(list(pattern_points.values()), list(image_points.values()), image_size, None, None)
+    pattern_points_calib = list(pattern_points.values())
+    image_points_calib = list(image_points.values())
+    if args.extrinsic:
+        pattern_points_calib = np.concatenate(pattern_points_calib)
+        image_points_calib = np.concatenate(image_points_calib)
+    
+    reprojection_err, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(pattern_points_calib, image_points_calib, image_size, None, None)
 
     print("[INFO]: Reprojection error: {}".format(reprojection_err))
 
