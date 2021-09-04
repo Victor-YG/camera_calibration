@@ -127,12 +127,13 @@ def find_circle_pattern_in_images(image_paths, spec):
     return pattern_points, image_points, images_overlayed
 
 
-def save_calibration_result(file_path, image_paths, image_size, intrinsic, distortion, t_vecs, r_vecs):
+def save_calibration_result(file_path, image_paths, image_size, intrinsic, distortion, t_vecs, r_vecs, reproj_err):
     calib_result = {}
     calib_result["width"] = image_size[1]
     calib_result["height"] = image_size[0]
     calib_result["intrinsic"] = intrinsic.reshape(-1).tolist()
     calib_result["distortion"] = distortion.reshape(-1).tolist()
+    calib_result["reprojection_error"] = reproj_err
     calib_result["extrinsic"] = []
 
     for image_path, r_vec, t_vec in zip(image_paths, r_vecs, t_vecs):
@@ -257,6 +258,7 @@ def main():
 
     if args.extrinsic:
         ret, r_vec, t_vec, reprojection_err = cv2.solvePnPGeneric(pattern_points_calib, image_points_calib, intrinsic, distortion)
+        reprojection_err = np.mean(reprojection_err).item()
         r_vecs = [np.array(r_vec)]
         t_vecs = [np.array(t_vec)]
     else:
@@ -268,7 +270,7 @@ def main():
     # save output #
     ###############
     # save calib result as json
-    save_calibration_result(args.output, image_paths,image_size, intrinsic, distortion, t_vecs, r_vecs)
+    save_calibration_result(args.output, image_paths,image_size, intrinsic, distortion, t_vecs, r_vecs, reprojection_err)
 
     # save loverlayed images
     if args.save_images:
