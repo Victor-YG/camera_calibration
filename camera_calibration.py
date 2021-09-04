@@ -7,7 +7,6 @@ import argparse
 import numpy as np
 
 # TODO::use logging module to handle print output
-# TODO::test circle pattern and ChArUco pattern
 
 def create_pattern(spec):
     # TODO::draw the pattern out and verify
@@ -154,9 +153,10 @@ def find_charuco_pattern_in_iamges(image_paths, spec):
     return pattern, point_ids, points, images_overlayed
 
 
-def save_calibration_result(file_path, image_paths, intrinsic, distortion, t_vecs, r_vecs):
+def save_calibration_result(file_path, image_paths, image_size, intrinsic, distortion, t_vecs, r_vecs):
     calib_result = {}
-
+    calib_result["width"] = image_size[1]
+    calib_result["height"] = image_size[0]
     calib_result["intrinsic"] = intrinsic.reshape(-1).tolist()
     calib_result["distortion"] = distortion.tolist()
     calib_result["extrinsic"] = []
@@ -164,9 +164,18 @@ def save_calibration_result(file_path, image_paths, intrinsic, distortion, t_vec
     for image_path, r_vec, t_vec in zip(image_paths, r_vecs, t_vecs):
         extrinsic = {}
         extrinsic["image"] = os.path.basename(image_path)
+        
         pose = r_vec.reshape(-1).tolist()
         pose.extend(t_vec.reshape(-1).tolist())
         extrinsic["pose"]  = pose
+
+        mat = np.eye(4, 4)
+        mat_rot, jacobian = cv2.Rodrigues(r_vec)
+        print(mat_rot)
+        mat[0:3, 0:3] = mat_rot
+        mat[0:3, 3] = t_vec[:, 0]
+        extrinsic["matrix"] = mat.flatten().tolist()
+
         # TODO::add pose to matrix conversion
         calib_result["extrinsic"].append(extrinsic)
     
@@ -256,6 +265,7 @@ def main():
     #############
     overlayed = list(images_overlayed.values())
     image_size = overlayed[0].shape[0:-1]
+    print(image_size)
 
     if "ChArUco" in pattern:
         points = [x for x in image_points.values() if len(x) >= 4]
@@ -265,10 +275,11 @@ def main():
         reprojection_err, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(list(pattern_points.values()), list(image_points.values()), image_size, None, None)
 
     print("[INFO]: Reprojection error: {}".format(reprojection_err))
+
     #######################
     # save output as JSON #
     #######################
-    save_calibration_result(args.output, image_paths, intrinsic, distortion, t_vecs, r_vecs)
+    save_calibration_result(args.output, image_paths,image_size, intrinsic, distortion, t_vecs, r_vecs)
     
     # save loverlayed images
     if args.save_images:
