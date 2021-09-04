@@ -9,7 +9,6 @@ import numpy as np
 # TODO::use logging module to handle print output
 
 def create_pattern(spec):
-    # TODO::draw the pattern out and verify
     pattern = np.zeros((spec["cols"] * spec["rows"], 3), np.float32)
 
     # create grid
@@ -39,6 +38,17 @@ def create_pattern(spec):
 
     pattern[:, 0:2] = grid
     return pattern
+
+
+def load_camera_intrinsic(file_path):
+    with open(file_path, 'r') as f:
+        camera_info = json.load(f)
+
+    image_size = (camera_info["height"], camera_info["width"])
+    intrinsic_input = np.array(camera_info["intrinsic"]).reshape(3, 3)
+    distortion_input = np.array(camera_info["distortion"])
+
+    return image_size, intrinsic_input, distortion_input
 
 
 def find_checkerboard_pattern_in_images(image_paths, spec):
@@ -122,7 +132,7 @@ def save_calibration_result(file_path, image_paths, image_size, intrinsic, disto
     calib_result["width"] = image_size[1]
     calib_result["height"] = image_size[0]
     calib_result["intrinsic"] = intrinsic.reshape(-1).tolist()
-    calib_result["distortion"] = distortion.tolist()
+    calib_result["distortion"] = distortion.reshape(-1).tolist()
     calib_result["extrinsic"] = []
 
     for image_path, r_vec, t_vec in zip(image_paths, r_vecs, t_vecs):
@@ -136,10 +146,8 @@ def save_calibration_result(file_path, image_paths, image_size, intrinsic, disto
         mat = np.eye(4, 4)
         mat_rot, jacobian = cv2.Rodrigues(r_vec)
         mat[0:3, 0:3] = mat_rot
-        mat[0:3, 3] = t_vec[:, 0]
+        mat[0:3, 3] = t_vec.reshape(-1)
         extrinsic["matrix"] = mat.flatten().tolist()
-
-        # TODO::add pose to matrix conversion
         calib_result["extrinsic"].append(extrinsic)
     
     with open(file_path, "w") as f:
@@ -171,8 +179,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", help="Input image(s) or folder of images", required=True)
     parser.add_argument("--output", help="File or folder to output the calibration result", default=None, required=False)
-    parser.add_argument("--key", help="Keyword of images (e.g. *.png)", default="", required=False)
+    parser.add_argument("--key", help="Keyword of images (e.g. *.png)", default="*", required=False)
     parser.add_argument("--pattern", help="JSON file that specifies the calibration pattern.", required=True)
+    parser.add_argument("--intrinsic", help="Intrinsic information of the camera.", default=None, required=False)
     parser.add_argument("-extrinsic", help="Extrinsic calibration. Combine points from multiple static images.", action="store_true")
     parser.add_argument("-save_images", help="Save overlayed images.", action="store_true")
     args = parser.parse_args()
@@ -182,6 +191,10 @@ def main():
     
     if os.path.exists(args.pattern) == False:
         exit("[FAIL]: Pattern file does not exist.")
+
+    if args.intrinsic != None:
+        if os.path.exists(args.intrinsic) == False:
+            exit("[FAIL]: Input camera intrinsic file does not exist.")
 
     if args.output == None:
         if os.path.isdir(args.input):
@@ -226,21 +239,37 @@ def main():
     overlayed = list(images_overlayed.values())
     image_size = overlayed[0].shape[0:-1]
 
+    # reshape pattern points and image points
     pattern_points_calib = list(pattern_points.values())
     image_points_calib = list(image_points.values())
     if args.extrinsic:
         pattern_points_calib = np.concatenate(pattern_points_calib)
         image_points_calib = np.concatenate(image_points_calib)
     
-    reprojection_err, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(pattern_points_calib, image_points_calib, image_size, None, None)
+    # run calibration
+    if args.intrinsic == None:
+        intrinsic = None
+        distortion = None
+    else:
+        (width, height), intrinsic, distortion = load_camera_intrinsic(args.intrinsic)
+        if width != image_size[0] or height != image_size[1]:
+            exit("[FAIL]: Input image size doesn't match with image size from intrinsic file.")
+
+    if args.extrinsic:
+        ret, r_vec, t_vec, reprojection_err = cv2.solvePnPGeneric(pattern_points_calib, image_points_calib, intrinsic, distortion)
+        r_vecs = [np.array(r_vec)]
+        t_vecs = [np.array(t_vec)]
+    else:
+        reprojection_err, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(pattern_points_calib, image_points_calib, image_size, intrinsic, distortion)
 
     print("[INFO]: Reprojection error: {}".format(reprojection_err))
 
-    #######################
-    # save output as JSON #
-    #######################
+    ###############
+    # save output #
+    ###############
+    # save calib result as json
     save_calibration_result(args.output, image_paths,image_size, intrinsic, distortion, t_vecs, r_vecs)
-    
+
     # save loverlayed images
     if args.save_images:
         save_overlayed_images(args.output, images_overlayed, intrinsic, distortion, r_vecs, t_vecs)
