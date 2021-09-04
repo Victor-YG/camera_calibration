@@ -11,32 +11,34 @@ import numpy as np
 
 def create_pattern(spec):
     # TODO::draw the pattern out and verify
-    pattern = np.zeros((spec["rows"] * spec["cols"], 3), np.float32)
+    pattern = np.zeros((spec["cols"] * spec["rows"], 3), np.float32)
 
     # create grid
-    grid = np.mgrid[0 : spec["rows"], 0 : spec["cols"]].T.reshape(-1, 2)
+    grid = np.mgrid[0 : spec["cols"], 0 : spec["rows"]].T.reshape(-1, 2)
     grid = grid * spec["grid_size"]
 
     # handle asymmetric
     if "asymmetric" in spec:
-        if spec["asymmetric"]:
+        if spec["asymmetric"] == True:
             new_grid = []
 
             # keep only even half
             for r in range(spec["rows"]):
                 for c in range(spec["cols"]):
-                    if r + c % 2 == 0:
+                    if (r + c) % 2 == 0:
                         new_grid.append(grid[c + r * spec["cols"]])
 
             # adjust scaling
-            grid = new_grid / math.sqrt(2)
+            grid = np.array(new_grid) / math.sqrt(2)
+            
+            # half the feature count
+            pattern = np.zeros((len(grid), 3), np.float32)
 
     # apply offset
     grid[:, 0] += spec["x_offset"]
     grid[:, 1] += spec["y_offset"]
 
     pattern[:, 0:2] = grid
-    # print(pattern)
     return pattern
 
 
@@ -57,7 +59,7 @@ def find_checkerboard_pattern_in_images(image_paths, spec):
         img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         # find corners points
-        ret, corners = cv2.findChessboardCorners(img_gray, (spec["rows"], spec["cols"]), None)
+        ret, corners = cv2.findChessboardCorners(img_gray, (spec["cols"], spec["rows"]), None)
 
         if ret == True:
             # refine corner points
@@ -65,7 +67,7 @@ def find_checkerboard_pattern_in_images(image_paths, spec):
 
             # Draw and display the corners
             # TODO::extract the below common part either by creating a wrapper function or as a sub function (depends on how ChArUco should be handled)
-            image_overlayed = cv2.drawChessboardCorners(image, (spec["rows"], spec["cols"]), corners_accurate, ret)
+            image_overlayed = cv2.drawChessboardCorners(image, (spec["cols"], spec["rows"]), corners_accurate, ret)
 
             # add points
             pattern_points[image_path] = pattern
@@ -73,7 +75,7 @@ def find_checkerboard_pattern_in_images(image_paths, spec):
             images_overlayed[image_path] = image_overlayed
 
         else:
-            print("[WARN] Failed to find pattern in image: '{}'".format(image_path))
+            print("[WARN]: Failed to find pattern in image: '{}'".format(image_path))
 
     return pattern_points, image_points, images_overlayed
 
@@ -92,13 +94,18 @@ def find_circle_pattern_in_images(image_paths, spec):
 
         # find circle centers
         if spec["asymmetric"]:
-            ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_ASYMMETRIC_GRID)
+            if spec["cols"] % 2 == 0 and spec["rows"] % 2 == 1:
+                pattern_size = (math.floor(spec["cols"] / 2), spec["rows"])
+            else:
+                exit("[FAIL]: asymmetric pattern is actual symmetric.")
+            success, centers = cv2.findCirclesGrid(img_gray, pattern_size, None, cv2.CALIB_CB_ASYMMETRIC_GRID + cv2.CALIB_CB_CLUSTERING)
         else:
-            ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_SYMMETRIC_GRID)
+            pattern_size = (spec["cols"], spec["rows"])
+            success, centers = cv2.findCirclesGrid(img_gray, pattern_size, None, cv2.CALIB_CB_SYMMETRIC_GRID + cv2.CALIB_CB_CLUSTERING)
 
-        if ret == True:
+        if success == True:
             # Draw and display the corners
-            image_overlayed = cv2.drawChessboardCorners(image, (spec["rows"], spec["cols"]), centers, ret)
+            image_overlayed = cv2.drawChessboardCorners(image, pattern_size, centers, success)
 
             # add points
             pattern_points[image_path] = pattern
@@ -106,7 +113,7 @@ def find_circle_pattern_in_images(image_paths, spec):
             images_overlayed[image_path] = image_overlayed
 
         else:
-            print("[WARN] Failed to find pattern in image: '{}'".format(image_path))
+            print("[WARN]: Failed to find pattern in image: '{}'".format(image_path))
 
     return pattern_points, image_points, images_overlayed
 
@@ -123,19 +130,17 @@ def find_charuco_pattern_in_iamges(image_paths, spec):
         aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
     
     # create pattern
-    pattern = cv2.aruco.CharucoBoard_create(spec["rows"], spec["cols"], spec["grid_size"], spec["marker_size"], aruco_dict)
+    pattern = cv2.aruco.CharucoBoard_create(spec["cols"], spec["rows"], spec["grid_size"], spec["marker_size"], aruco_dict)
+
 
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.00001)
 
     for image_path in image_paths:
-        img = cv2.imread(image_path)
-        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        image = cv2.imread(image_path)
+        img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(img_gray, aruco_dict)
 
         if len(corners) > 0:
-            # refine corners
-            corners_accurate = cv2.cornerSubPix(img_gray, corners, (11, 11), (-1, -1), criteria)
-
             # interpolate corners
             count, corners_final, ids_final = cv2.aruco.interpolateCornersCharuco(corners, ids, img_gray, pattern)
             if count > 0:
@@ -143,45 +148,10 @@ def find_charuco_pattern_in_iamges(image_paths, spec):
                 point_ids[image_path] = ids_final
 
                 # Draw and display the corners
-                image_overlayed = cv2.drawChessboardCorners(image_path, (spec["rows"], spec["cols"]), corners_final)
+                image_overlayed = cv2.aruco.drawDetectedCornersCharuco(image, corners_final, ids_final)
                 images_overlayed[image_path] = image_overlayed
 
     return pattern, point_ids, points, images_overlayed
-
-
-def find_charuco_pattern_in_iamges_2(image_paths, spec):
-    pattern_points = {}
-    image_points = {}
-    images_overlayed = {}
-
-    # construct pattern
-    pattern = create_pattern(spec)
-    aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
-    pattern = cv2.aruco.CharucoBoard_create(spec["rows"], spec["cols"], 1, .8, aruco_dict)
-
-    for image_path in image_paths:
-        image = cv2.imread(image_path)
-        img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        # find circle centers
-        if spec["asymmetric"]:
-            ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_ASYMMETRIC_GRID)
-        else:
-            ret, centers = cv2.findCirclesGrid(img_gray, (spec["rows"], spec["cols"]), cv2.CALIB_CB_SYMMETRIC_GRID)
-
-        if ret == True:
-            # Draw and display the corners
-            image_overlayed = cv2.drawChessboardCorners(image, (spec["rows"], spec["cols"]), centers, ret)
-
-            # add points
-            pattern_points[image_path] = pattern
-            image_points[image_path] = centers
-            images_overlayed[image_path] = image_overlayed
-
-        else:
-            print("[WARN] Failed to find pattern in image: '{}'".format(image_path))
-
-    return pattern_points, image_points, images_overlayed
 
 
 def save_calibration_result(file_path, image_paths, intrinsic, distortion, t_vecs, r_vecs):
@@ -203,7 +173,7 @@ def save_calibration_result(file_path, image_paths, intrinsic, distortion, t_vec
     with open(file_path, "w") as f:
         json.dump(calib_result, indent=4, fp=f)
     
-    print("[INFO] Calibration output saved to: '{}'".format(file_path))
+    print("[INFO]: Calibration output saved to: '{}'".format(file_path))
 
 
 def save_overlayed_images(output_folder, images_overlayed):
@@ -217,7 +187,7 @@ def save_overlayed_images(output_folder, images_overlayed):
         output_path = os.path.join(output_folder, base_name + "_overlayed" + ext)
         cv2.imwrite(output_path, image)
     
-    print("[INFO] Saved overlayed images to: '{}'".format(output_folder))
+    print("[INFO]: Saved overlayed images to: '{}'".format(output_folder))
 
 
 def main():
@@ -235,10 +205,10 @@ def main():
     args = parser.parse_args()
 
     if os.path.exists(args.input) == False:
-        exit("[FAIL] Input path is not valid.")
+        exit("[FAIL]: Input path is not valid.")
     
     if os.path.exists(args.pattern) == False:
-        exit("[FAIL] Pattern file does not exist.")
+        exit("[FAIL]: Pattern file does not exist.")
 
     if args.output == None:
         if os.path.isdir(args.input):
@@ -252,11 +222,10 @@ def main():
     image_paths = sorted(glob.glob(os.path.join(args.input, args.key)))
 
     if len(image_paths) == 0:
-        exit("[FAIL] Failed to find images in folder '{}' with key '{}'".format(args.input, args.key))
+        exit("[FAIL]: Failed to find images in folder '{}' with key '{}'".format(args.input, args.key))
 
-    print("[INFO] Found images: ")
     for image_path in image_paths:
-        print(image_path)
+        print("[INFO]: Found images: '{}'".format(image_path))
     
     ##########################
     # find pattern in images #
@@ -270,15 +239,17 @@ def main():
     if "checkerboard" in pattern:
         spec = pattern["checkerboard"]
         pattern_points, image_points, images_overlayed = find_checkerboard_pattern_in_images(image_paths, spec)
-    elif "circle" in pattern:
-        spec = pattern["circle"]
+    elif "circles" in pattern:
+        spec = pattern["circles"]
         pattern_points, image_points, images_overlayed = find_circle_pattern_in_images(image_paths, spec)
     elif "ChArUco" in pattern:
         spec = pattern["ChArUco"]
-        pattern, pattern_points, image_points, images_overlayed = find_charuco_pattern_in_iamges(image_paths, spec)
+        pattern_charuco, pattern_points, image_points, images_overlayed = find_charuco_pattern_in_iamges(image_paths, spec)
+    else:
+        exit("[FAIL]: Unrecognized pattern name.")
 
     if len(image_points) == 0:
-        exit("[FAIL] Failed to find any pattern.")
+        exit("[FAIL]: Failed to find any pattern.")
 
     #############
     # calibrate #
@@ -289,10 +260,11 @@ def main():
     if "ChArUco" in pattern:
         points = [x for x in image_points.values() if len(x) >= 4]
         point_ids = [x for x in pattern_points.values() if len(x) >= 4]
-        ret, camera_matrix, dist_coeff, rvec, tvec = cv2.aruco.calibrateCameraCharuco(points, point_ids, pattern, image_size, None, None)
+        reprojection_err, intrinsic, distortion, r_vecs, t_vecs = cv2.aruco.calibrateCameraCharuco(points, point_ids, pattern_charuco, image_size, None, None)
     else:
-        ret, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(list(pattern_points.values()), list(image_points.values()), image_size, None, None)
+        reprojection_err, intrinsic, distortion, r_vecs, t_vecs = cv2.calibrateCamera(list(pattern_points.values()), list(image_points.values()), image_size, None, None)
 
+    print("[INFO]: Reprojection error: {}".format(reprojection_err))
     #######################
     # save output as JSON #
     #######################

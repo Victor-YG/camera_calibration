@@ -17,3 +17,9 @@ https://docs.opencv.org/4.5.1/d4/d94/tutorial_camera_calibration.html
 
 charuco (to be tested):
 https://docs.opencv.org/4.5.1/df/d4a/tutorial_charuco_detection.html
+
+Special Notes:
+1. For asymmetric circle pattern, the number of rows need to be odd and the columns to be even.
+2. For ChArUco pattern, the origin is defined at the bottom left corner due to the order marker is created.
+3. For other patterns, the origin is defined at the top left corner.
+4. The detected axis of the pattern has z axis pointing into the plate (away from the camera).
